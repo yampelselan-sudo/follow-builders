@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-12T04:41:33.735Z",
+  "generatedAt": "2026-05-12T04:49:07.208Z",
   "lookbackHours": 24,
   "x": [],
   "stats": {
@@ -7,6 +7,35 @@
     "totalTweets": 0
   },
   "errors": [
-    "X API: User lookup failed: HTTP 402"
+    "Nitter RSS: Could not fetch tweets for @karpathy (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @swyx (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @joshwoodward (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @kevinweil (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @petergyang (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @thenanyu (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @realmadhuguru (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @AmandaAskell (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @_catwu (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @trq212 (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @GoogleLabs (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @amasad (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @rauchg (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @alexalbert__ (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @levie (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @ryolu_ (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @garrytan (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @mattturck (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @zarazhangrui (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @nikunj (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @steipete (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @danshipper (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @adityaag (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @sama (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @claudeai (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @ai_xiaomu (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @weiyux2021 (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @Khazix0918 (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @RayDalio (all instances failed)",
+    "Nitter RSS: Could not fetch tweets for @bourneliu66 (all instances failed)"
   ]
 }
