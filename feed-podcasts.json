@@ -1,12 +1,8 @@
 {
-  "generatedAt": "2026-05-12T04:39:43.076Z",
+  "generatedAt": "2026-05-12T04:41:34.893Z",
   "lookbackHours": 336,
   "podcasts": [],
   "stats": {
     "podcastEpisodes": 0
-  },
-  "errors": [
-    "Podcast: Transcript error for \"Amex Global Business Travel: The World’s First AI Take Private with Long Lake CEO Alexander Taubman\": HTTP 401: {\"status\":\"error\",\"message\":\"Invalid API key\"}",
-    "Podcast: Transcript error for \"How Stripe Is Building for an Agent-native World\": HTTP 401: {\"status\":\"error\",\"message\":\"Invalid API key\"}"
-  ]
+  }
 }
