@@ -991,8 +991,7 @@ async function main() {
   const pod2txtKey = process.env.POD2TXT_API_KEY;
 
   if (runPodcasts && !pod2txtKey) {
-    console.error("POD2TXT_API_KEY not set");
-    process.exit(1);
+    console.error("POD2TXT_API_KEY not set — skipping podcasts");
   }
   if (runTweets && !xBearerToken) {
     console.error("X_BEARER_TOKEN not set");
