@@ -10,7 +10,7 @@
 // URLs in state-feed.json so content is never repeated across runs.
 //
 // Usage: node generate-feed.js [--tweets-only | --podcasts-only | --blogs-only]
-// Env vars needed: X_BEARER_TOKEN, POD2TXT_API_KEY
+// Env vars needed: POD2TXT_API_KEY (only for podcasts; tweets use RSS, no key needed)
 // ============================================================================
 
 import { readFile, writeFile } from "fs/promises";
@@ -20,7 +20,15 @@ import { join } from "path";
 // -- Constants ---------------------------------------------------------------
 
 const POD2TXT_BASE = "https://pod2txt.vercel.app/api";
-const X_API_BASE = "https://api.x.com/2";
+// Nitter instances for free X/Twitter RSS fetching (no API key needed)
+// Multiple fallbacks in case some are blocked by GitHub Actions IPs
+const NITTER_INSTANCES = [
+  "https://nitter.net",
+  "https://nitter.privacydev.net",
+  "https://nitter.poast.org",
+  "https://nitter.lucabased.xyz",
+  "https://nitter.esmailelbob.xyz",
+];
 // Some RSS hosts (notably Substack) block non-browser user agents from cloud IPs.
 // Using a real Chrome UA avoids 403 errors in GitHub Actions.
 const RSS_USER_AGENT =
@@ -518,115 +526,132 @@ async function fetchPodcastContent(podcasts, apiKey, state, errors) {
   return [];
 }
 
-// -- X/Twitter Fetching (Official API v2) ------------------------------------
+// -- X/Twitter Fetching (Nitter RSS — free, no API key needed) -----------------
 
-async function fetchXContent(xAccounts, bearerToken, state, errors) {
-  const results = [];
-  const cutoff = new Date(Date.now() - TWEET_LOOKBACK_HOURS * 60 * 60 * 1000);
+// Nitter RSS feeds contain tweet text in <description> wrapped in HTML.
+// Strip HTML tags and decode common entities to get plain text.
+function stripHtml(html) {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  // Batch lookup all user IDs (1 API call)
-  const handles = xAccounts.map((a) => a.handle);
-  let userMap = {};
+// Parse a Nitter RSS XML string into tweet objects.
+function parseNitterRss(xml) {
+  const tweets = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+  let itemMatch;
+  while ((itemMatch = itemRegex.exec(xml)) !== null) {
+    const block = itemMatch[1];
 
-  for (let i = 0; i < handles.length; i += 100) {
-    const batch = handles.slice(i, i + 100);
-    try {
-      const res = await fetch(
-        `${X_API_BASE}/users/by?usernames=${batch.join(",")}&user.fields=name,description`,
-        { headers: { Authorization: `Bearer ${bearerToken}` } },
-      );
+    // Extract title (first ~140 chars of tweet)
+    const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
+    const title = titleMatch ? titleMatch[1].trim() : "";
 
-      if (!res.ok) {
-        errors.push(`X API: User lookup failed: HTTP ${res.status}`);
-        continue;
-      }
+    // Extract description (full tweet text with HTML)
+    const descMatch = block.match(/<description>([\s\S]*?)<\/description>/);
+    const desc = descMatch ? descMatch[1].trim() : title;
 
-      const data = await res.json();
-      for (const user of data.data || []) {
-        userMap[user.username.toLowerCase()] = {
-          id: user.id,
-          name: user.name,
-          description: user.description || "",
-        };
-      }
-      if (data.errors) {
-        for (const err of data.errors) {
-          errors.push(`X API: User not found: ${err.value || err.detail}`);
-        }
-      }
-    } catch (err) {
-      errors.push(`X API: User lookup error: ${err.message}`);
+    // Extract GUID (unique tweet identifier, contains the status ID)
+    const guidMatch = block.match(/<guid[^>]*>([\s\S]*?)<\/guid>/);
+    const guid = guidMatch ? guidMatch[1].trim() : "";
+    const id = guid.split("/status/")[1] || guid.split("/").pop();
+
+    // Extract publish date
+    const pubDateMatch = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+    const pubDate = pubDateMatch ? new Date(pubDateMatch[1].trim()).toISOString() : null;
+
+    // Extract link
+    const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
+    const link = linkMatch ? linkMatch[1].trim() : guid;
+
+    if (id && title) {
+      tweets.push({
+        id,
+        text: stripHtml(desc),
+        title: stripHtml(title),
+        createdAt: pubDate,
+        url: link,
+        likes: 0,    // Nitter RSS doesn't include engagement metrics
+        retweets: 0,
+        replies: 0,
+        isQuote: false,
+        quotedTweetId: null,
+      });
     }
   }
+  return tweets;
+}
 
-  // Fetch recent tweets per user (max 3, exclude retweets/replies)
+async function fetchXContent(xAccounts, _bearerToken, state, errors) {
+  const results = [];
+  // Nitter RSS gives most recent tweets first; we look back up to 48h
+  // to handle instances that are slightly delayed
+  const lookbackHours = Math.max(TWEET_LOOKBACK_HOURS, 48);
+  const cutoff = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+
   for (const account of xAccounts) {
-    const userData = userMap[account.handle.toLowerCase()];
-    if (!userData) continue;
+    let feedXml = null;
 
-    try {
-      const res = await fetch(
-        `${X_API_BASE}/users/${userData.id}/tweets?` +
-          `max_results=5` + // fetch 5, then filter to 3 new ones
-          `&tweet.fields=created_at,public_metrics,referenced_tweets,note_tweet` +
-          `&exclude=retweets,replies` +
-          `&start_time=${cutoff.toISOString()}`,
-        { headers: { Authorization: `Bearer ${bearerToken}` } },
-      );
-
-      if (!res.ok) {
-        if (res.status === 429) {
-          errors.push(`X API: Rate limited, skipping remaining accounts`);
+    // Try each Nitter instance until one works
+    for (const instance of NITTER_INSTANCES) {
+      try {
+        const url = `${instance}/${account.handle}/rss`;
+        const res = await fetch(url, {
+          headers: { "User-Agent": RSS_USER_AGENT },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          feedXml = await res.text();
           break;
         }
-        errors.push(
-          `X API: Failed to fetch tweets for @${account.handle}: HTTP ${res.status}`,
-        );
-        continue;
+      } catch {
+        continue; // try next instance
       }
-
-      const data = await res.json();
-      const allTweets = data.data || [];
-
-      // Filter out already-seen tweets, cap at 3
-      const newTweets = [];
-      for (const t of allTweets) {
-        if (state.seenTweets[t.id]) continue; // dedup
-        if (newTweets.length >= MAX_TWEETS_PER_USER) break;
-
-        newTweets.push({
-          id: t.id,
-          // note_tweet.text has the full untruncated text for long tweets (>280 chars)
-          text: t.note_tweet?.text || t.text,
-          createdAt: t.created_at,
-          url: `https://x.com/${account.handle}/status/${t.id}`,
-          likes: t.public_metrics?.like_count || 0,
-          retweets: t.public_metrics?.retweet_count || 0,
-          replies: t.public_metrics?.reply_count || 0,
-          isQuote:
-            t.referenced_tweets?.some((r) => r.type === "quoted") || false,
-          quotedTweetId:
-            t.referenced_tweets?.find((r) => r.type === "quoted")?.id || null,
-        });
-
-        // Mark as seen
-        state.seenTweets[t.id] = Date.now();
-      }
-
-      if (newTweets.length === 0) continue;
-
-      results.push({
-        source: "x",
-        name: account.name,
-        handle: account.handle,
-        bio: userData.description,
-        tweets: newTweets,
-      });
-
-      await new Promise((r) => setTimeout(r, 200));
-    } catch (err) {
-      errors.push(`X API: Error fetching @${account.handle}: ${err.message}`);
     }
+
+    if (!feedXml) {
+      errors.push(`Nitter RSS: Could not fetch tweets for @${account.handle} (all instances failed)`);
+      continue;
+    }
+
+    // Parse RSS into tweets
+    const allTweets = parseNitterRss(feedXml);
+
+    // Filter to only new tweets within lookback window
+    const newTweets = [];
+    for (const t of allTweets) {
+      if (state.seenTweets[t.id]) continue;
+      if (newTweets.length >= MAX_TWEETS_PER_USER) break;
+      if (t.createdAt && new Date(t.createdAt) < cutoff) continue;
+
+      // Skip retweets (starting with "RT @")
+      if (t.text.startsWith("RT @")) continue;
+
+      newTweets.push(t);
+      state.seenTweets[t.id] = Date.now();
+    }
+
+    if (newTweets.length === 0) continue;
+
+    results.push({
+      source: "x",
+      name: account.name,
+      handle: account.handle,
+      bio: "",  // Nitter RSS doesn't provide user bio
+      tweets: newTweets,
+    });
+
+    // Small delay between accounts to be nice to Nitter instances
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   return results;
@@ -987,15 +1012,11 @@ async function main() {
   const runPodcasts = podcastsOnly || (!tweetsOnly && !blogsOnly);
   const runBlogs = blogsOnly || (!tweetsOnly && !podcastsOnly);
 
-  const xBearerToken = process.env.X_BEARER_TOKEN;
+  const xBearerToken = "rss";
   const pod2txtKey = process.env.POD2TXT_API_KEY;
 
   if (runPodcasts && !pod2txtKey) {
     console.error("POD2TXT_API_KEY not set — skipping podcasts");
-  }
-  if (runTweets && !xBearerToken) {
-    console.error("X_BEARER_TOKEN not set");
-    process.exit(1);
   }
 
   const sources = await loadSources();
@@ -1020,8 +1041,8 @@ async function main() {
       x: xContent,
       stats: { xBuilders: xContent.length, totalTweets },
       errors:
-        errors.filter((e) => e.startsWith("X API")).length > 0
-          ? errors.filter((e) => e.startsWith("X API"))
+        errors.filter((e) => e.startsWith("Nitter RSS")).length > 0
+          ? errors.filter((e) => e.startsWith("Nitter RSS"))
           : undefined,
     };
     await writeFile(
